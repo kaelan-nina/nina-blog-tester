@@ -68,14 +68,35 @@ Returns published post summaries. Add `?drafts=1` with a valid Bearer token to i
 
 ## How content is stored
 
-Posts are written as MDX files with frontmatter into `content/blog/`, matching the
-spec's recommended Git-backed architecture. The save step lives in `src/lib/store.ts`
-and is intentionally **swappable** — to move to a database or headless CMS, reimplement
-`savePost` / `listPosts` / `getPost` and nothing else changes.
+Reads (`getPost` / `listPosts`) always come from the local filesystem (`content/blog/`).
+On Vercel the committed MDX files are baked into each build, so the reader works in dev
+and production alike.
 
-> **Hosting note:** filesystem writes are perfect for local dev and make this a real
-> round-trip testbed. On Vercel's serverless runtime the filesystem is ephemeral, so for
-> production publishing you'd swap `savePost()` for a GitHub-commit or DB write (spec §2–3).
+Writes (`savePost`) go through a **swappable driver** set by `BLOG_STORAGE`:
+
+| Driver | What it does | Use for |
+|---|---|---|
+| `fs` | Writes the MDX file to disk | Local `next dev` — a real round-trip |
+| `git` | Commits the MDX to GitHub via the API, triggering a Vercel rebuild | Production on Vercel |
+
+If `BLOG_STORAGE` is unset it defaults to `git` when `GITHUB_TOKEN` is present (i.e. on
+Vercel) and `fs` otherwise. The git path lives in `src/lib/git-store.ts`; to move to a
+database or headless CMS instead, add another driver branch in `savePost` — nothing else
+changes.
+
+### Enabling the git driver in production
+
+The serverless filesystem on Vercel is read-only at runtime, so production publishing
+commits to the repo and lets Vercel's Git integration redeploy. To enable it, set these
+in **Vercel → Settings → Environment Variables**:
+
+- `BLOG_STORAGE` = `git`
+- `GITHUB_TOKEN` = a **fine-grained Personal Access Token** scoped to this repo with
+  **Contents: Read and write**
+- `GITHUB_OWNER` = `kaelan-nina`, `GITHUB_REPO` = `nina-blog-tester`, `GITHUB_BRANCH` = `main`
+
+A `POST /api/posts` then commits `content/blog/<slug>.mdx`, Vercel rebuilds, and the post
+goes live in ~30–60s. The `201` response includes the `commit` sha.
 
 ## Pointing the reader at an external API
 

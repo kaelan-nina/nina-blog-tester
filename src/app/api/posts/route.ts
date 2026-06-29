@@ -48,6 +48,7 @@ export async function POST(req: Request) {
         ok: true,
         slug: post.slug,
         status: post.status,
+        ...(post.commit ? { commit: post.commit } : {}),
         url: `${origin}/blog/${post.slug}`,
       },
       { status: 201 },

@@ -1,21 +1,33 @@
-// File-backed post store.
+// Post store with a swappable WRITE driver.
 //
-// Posts are written as MDX files with YAML frontmatter into `content/blog/`,
-// matching the recommended Git-backed architecture in the spec. This is the
-// "save" step the spec calls out as swappable (Section 3): to move to a DB or
-// headless CMS, reimplement these functions and nothing else changes.
+//   READ  (getPost / listPosts): always from the local filesystem. On Vercel the
+//         committed MDX files are baked into each build, so the reader works in
+//         both dev and production.
+//   WRITE (savePost): driver-selected —
+//         • "fs"  → writes a file locally. Perfect round-trip for `next dev`.
+//         • "git" → commits the MDX to GitHub via the API, which triggers a
+//                   Vercel rebuild so the post goes live (spec §2). Use this in
+//                   production, where the runtime filesystem is read-only.
 //
-// NOTE on hosting: filesystem writes work perfectly for local dev (`next dev`)
-// and make this a real round-trip testbed. On Vercel's serverless runtime the
-// filesystem is ephemeral, so for production publishing you'd swap savePost()
-// for a GitHub-commit or database write (see spec Section 2/3).
+// Driver: BLOG_STORAGE = "fs" | "git". If unset, defaults to "git" when
+// GITHUB_TOKEN is present (i.e. on Vercel) and "fs" otherwise (local dev).
 
 import fs from "node:fs/promises";
 import path from "node:path";
 import matter from "gray-matter";
 import type { IncomingPost, Post, PostStatus, PostSummary } from "./types";
+import { gitCommitFile, gitPostExists } from "./git-store";
 
 const CONTENT_DIR = path.join(process.cwd(), "content", "blog");
+const CONTENT_REL = "content/blog"; // POSIX path used for Git commits
+
+type Driver = "fs" | "git";
+
+function driver(): Driver {
+  const explicit = process.env.BLOG_STORAGE?.toLowerCase();
+  if (explicit === "fs" || explicit === "git") return explicit;
+  return process.env.GITHUB_TOKEN ? "git" : "fs";
+}
 
 export function slugify(input: string): string {
   return input
@@ -35,6 +47,11 @@ function fileFor(slug: string): string {
   return path.join(CONTENT_DIR, `${slug}.mdx`);
 }
 
+function relPathFor(slug: string): string {
+  return `${CONTENT_REL}/${slug}.mdx`;
+}
+
+/** Filesystem existence check (used by the local reader / fs driver). */
 export async function postExists(slug: string): Promise<boolean> {
   try {
     await fs.access(fileFor(slug));
@@ -42,6 +59,11 @@ export async function postExists(slug: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Driver-aware existence check used before writing, to detect slug conflicts. */
+async function existsForWrite(slug: string): Promise<boolean> {
+  return driver() === "git" ? gitPostExists(relPathFor(slug)) : postExists(slug);
 }
 
 function parseFile(raw: string, slug: string): Post {
@@ -82,19 +104,9 @@ export async function listPosts(opts: { includeDrafts?: boolean } = {}): Promise
     .map(({ body, ...summary }) => summary);
 }
 
-/**
- * Persist an incoming post. Returns the normalized stored Post.
- * Throws { code: "CONFLICT" } if the slug already exists.
- */
-export async function savePost(incoming: IncomingPost): Promise<Post> {
-  await ensureDir();
+/** Normalize an incoming post and serialize it to MDX-with-frontmatter. */
+function buildPost(incoming: IncomingPost): { post: Post; fileContents: string } {
   const slug = incoming.slug ? slugify(incoming.slug) : slugify(incoming.title);
-
-  if (await postExists(slug)) {
-    const err = new Error(`Post with slug "${slug}" already exists`);
-    (err as Error & { code?: string }).code = "CONFLICT";
-    throw err;
-  }
 
   const post: Post = {
     title: incoming.title.trim(),
@@ -119,6 +131,33 @@ export async function savePost(incoming: IncomingPost): Promise<Post> {
   };
 
   const fileContents = matter.stringify(`\n${post.body}\n`, frontmatter);
-  await fs.writeFile(fileFor(slug), fileContents, "utf8");
+  return { post, fileContents };
+}
+
+/**
+ * Persist an incoming post via the active driver. Returns the normalized Post
+ * plus the commit sha when the git driver is used.
+ * Throws { code: "CONFLICT" } if the slug already exists.
+ */
+export async function savePost(incoming: IncomingPost): Promise<Post & { commit?: string }> {
+  const { post, fileContents } = buildPost(incoming);
+
+  if (await existsForWrite(post.slug)) {
+    const err = new Error(`Post with slug "${post.slug}" already exists`);
+    (err as Error & { code?: string }).code = "CONFLICT";
+    throw err;
+  }
+
+  if (driver() === "git") {
+    const commit = await gitCommitFile(
+      relPathFor(post.slug),
+      fileContents,
+      `Publish blog post: ${post.title}`,
+    );
+    return { ...post, commit };
+  }
+
+  await ensureDir();
+  await fs.writeFile(fileFor(post.slug), fileContents, "utf8");
   return post;
 }
