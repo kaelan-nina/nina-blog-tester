@@ -120,15 +120,17 @@ function buildPost(incoming: IncomingPost): { post: Post; fileContents: string }
     status: incoming.status ?? "publish",
   };
 
-  const frontmatter = {
+  // Build frontmatter without any `undefined` values — js-yaml refuses to
+  // serialize them. Only include coverImage when it actually has a value.
+  const frontmatter: Record<string, unknown> = {
     title: post.title,
     excerpt: post.excerpt,
     author: post.author,
     tags: post.tags,
-    coverImage: post.coverImage ?? undefined,
     publishedAt: post.publishedAt,
     status: post.status,
   };
+  if (post.coverImage) frontmatter.coverImage = post.coverImage;
 
   const fileContents = matter.stringify(`\n${post.body}\n`, frontmatter);
   return { post, fileContents };
