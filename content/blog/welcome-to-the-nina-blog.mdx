@@ -1,0 +1,31 @@
+---
+title: Welcome to the Nina Blog Tester
+excerpt: A starter post so the blog renders out of the box. Publish new posts by POSTing to /api/posts.
+author: Nina
+tags:
+  - getting-started
+coverImage: null
+publishedAt: '2026-06-29'
+status: publish
+---
+
+This site is a **base Next.js app** wired to test the Nina blog publishing pipeline end to end.
+
+## How content gets here
+
+Nina's n8n workflow sends a finished post as JSON to `POST /api/posts` with a bearer
+token. The endpoint validates it, writes an MDX file into `content/blog/`, and the
+post appears at `/blog/<slug>` — exactly like this one.
+
+## Try it yourself
+
+Run the dev server, then POST a sample post:
+
+```bash
+curl -X POST http://localhost:3000/api/posts \
+  -H "Authorization: Bearer $NINA_PUBLISH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"My First Post","body":"## Hello\n\nFrom the API."}'
+```
+
+Refresh the [blog index](/blog) and your new post is live.
