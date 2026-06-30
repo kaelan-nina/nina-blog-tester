@@ -37,6 +37,24 @@ export function validateIncomingPost(input: unknown): ValidationResult {
     errors.push("`publishedAt` must be a valid date string");
   }
 
+  // `schema` may be a JSON string, an object, or an array of objects. If it's a
+  // string, it must be valid JSON so we never inject malformed JSON-LD.
+  let schema: IncomingPost["schema"] | undefined;
+  if (b.schema !== undefined && b.schema !== null && b.schema !== "") {
+    if (typeof b.schema === "string") {
+      try {
+        JSON.parse(b.schema);
+        schema = b.schema;
+      } catch {
+        errors.push("`schema` must be valid JSON (string) or a JSON object");
+      }
+    } else if (typeof b.schema === "object") {
+      schema = b.schema as IncomingPost["schema"];
+    } else {
+      errors.push("`schema` must be a JSON string or object");
+    }
+  }
+
   if (errors.length > 0) return { ok: false, errors };
 
   const value: IncomingPost = {
@@ -49,6 +67,7 @@ export function validateIncomingPost(input: unknown): ValidationResult {
     coverImage: typeof b.coverImage === "string" ? b.coverImage : undefined,
     publishedAt: typeof b.publishedAt === "string" ? b.publishedAt : undefined,
     status: VALID_STATUS.includes(b.status as PostStatus) ? (b.status as PostStatus) : undefined,
+    schema,
   };
 
   return { ok: true, errors: [], value };

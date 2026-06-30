@@ -79,6 +79,7 @@ function parseFile(raw: string, slug: string): Post {
     coverImage: data.coverImage ? String(data.coverImage) : null,
     publishedAt: String(data.publishedAt ?? new Date().toISOString().slice(0, 10)),
     status,
+    schema: data.schema ? String(data.schema) : null,
   };
 }
 
@@ -101,12 +102,19 @@ export async function listPosts(opts: { includeDrafts?: boolean } = {}): Promise
     .filter((p): p is Post => p !== null)
     .filter((p) => (opts.includeDrafts ? true : p.status === "publish"))
     .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
-    .map(({ body, ...summary }) => summary);
+    // Drop body and schema from list summaries to keep the list endpoint lean.
+    .map(({ body, schema, ...summary }) => summary);
 }
 
 /** Normalize an incoming post and serialize it to MDX-with-frontmatter. */
 function buildPost(incoming: IncomingPost): { post: Post; fileContents: string } {
   const slug = incoming.slug ? slugify(incoming.slug) : slugify(incoming.title);
+
+  // Normalize schema to a JSON string (stored verbatim, injected as JSON-LD).
+  let schema: string | null = null;
+  if (incoming.schema !== undefined && incoming.schema !== null && incoming.schema !== "") {
+    schema = typeof incoming.schema === "string" ? incoming.schema : JSON.stringify(incoming.schema);
+  }
 
   const post: Post = {
     title: incoming.title.trim(),
@@ -118,6 +126,7 @@ function buildPost(incoming: IncomingPost): { post: Post; fileContents: string }
     coverImage: incoming.coverImage ?? null,
     publishedAt: incoming.publishedAt ?? new Date().toISOString().slice(0, 10),
     status: incoming.status ?? "publish",
+    schema,
   };
 
   // Build frontmatter without any `undefined` values — js-yaml refuses to
@@ -131,6 +140,7 @@ function buildPost(incoming: IncomingPost): { post: Post; fileContents: string }
     status: post.status,
   };
   if (post.coverImage) frontmatter.coverImage = post.coverImage;
+  if (post.schema) frontmatter.schema = post.schema;
 
   const fileContents = matter.stringify(`\n${post.body}\n`, frontmatter);
   return { post, fileContents };

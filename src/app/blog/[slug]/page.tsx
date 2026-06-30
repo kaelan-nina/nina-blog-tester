@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchPost } from "@/lib/api";
-import { renderMarkdown } from "@/lib/markdown";
+import { renderContent } from "@/lib/markdown";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +26,19 @@ export default async function PostPage({ params }: { params: { slug: string } })
   const post = await fetchPost(params.slug);
   if (!post) notFound();
 
-  const html = renderMarkdown(post.body);
+  const html = renderContent(post.body);
 
   return (
     <article className="mx-auto max-w-content px-6 py-16">
+      {/* JSON-LD structured data emitted verbatim from whatever the publisher sent. */}
+      {post.schema && (
+        <script
+          type="application/ld+json"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: post.schema }}
+        />
+      )}
+
       <Link href="/blog" className="text-sm font-semibold text-brand hover:text-brand-dark">
         ← Back to blog
       </Link>
